@@ -396,6 +396,61 @@
         firebase.initializeApp(firebaseConfig);
         const database = firebase.database();
 
+        // ============ FIREBASE SYNC FUNCTIONS ============
+        // Save data to Firebase and local storage
+        const saveToFirebase = async (tasks) => {
+            // Always save to localStorage first
+            try {
+                localStorage.setItem('rapidoTasks', JSON.stringify(tasks));
+                console.log("💾 Saved to local storage");
+            } catch (error) {
+                console.error("❌ Local storage failed:", error);
+            }
+
+            // Try Firebase if online
+            if (navigator.onLine) {
+                try {
+                    await database.ref('tasks').set(tasks);
+                    console.log("☁️ Synced to Firebase");
+                    return true;
+                } catch (error) {
+                    console.error("❌ Firebase sync failed:", error);
+                    return false;
+                }
+            }
+            return false;
+        };
+
+        // Load data from Firebase or localStorage
+        const loadFromFirebase = async () => {
+            // Try Firebase first if online
+            if (navigator.onLine) {
+                try {
+                    const snapshot = await database.ref('tasks').once('value');
+                    const firebaseTasks = snapshot.val();
+                    if (firebaseTasks && firebaseTasks.length > 0) {
+                        console.log("☁️ Loaded from Firebase");
+                        return firebaseTasks;
+                    }
+                } catch (error) {
+                    console.error("❌ Firebase load failed:", error);
+                }
+            }
+            
+            // Fallback to localStorage
+            try {
+                const localTasks = localStorage.getItem('rapidoTasks');
+                if (localTasks) {
+                    console.log("💾 Loaded from local storage");
+                    return JSON.parse(localTasks);
+                }
+            } catch (error) {
+                console.error("❌ Local storage load failed:", error);
+            }
+            
+            return null;
+        };
+
         // Theme definitions
         const colorThemes = {
             sunset: {
@@ -875,32 +930,33 @@
                 }
             };
 
-            // Load data from localStorage
+            // Load data from Firebase or localStorage
             useEffect(() => {
-                const savedTasks = localStorage.getItem('rapidoTasks');
-                if (savedTasks) {
-                    const parsedTasks = JSON.parse(savedTasks);
-                    // Add address, workHours, and invoiceNumber fields to existing tasks if missing
-                    const migratedTasks = parsedTasks.map((task, index) => {
-                        let invoiceNum = task.invoiceNumber;
-                        if (!invoiceNum) {
-                            // Generate invoice number from task creation date or use index
-                            const date = task.requestDate ? new Date(task.requestDate) : new Date();
-                            invoiceNum = date.toLocaleDateString('en-US', { 
-                                year: '2-digit', 
-                                month: '2-digit', 
-                                day: '2-digit' 
-                            }).replace(/\//g, '') + '-' + String(index + 1).padStart(4, '0');
-                        }
-                        return {
-                            ...task,
-                            address: task.address || '',
-                            workHours: task.workHours !== undefined ? task.workHours : 0,
-                            invoiceNumber: invoiceNum
-                        };
-                    });
-                    setTasks(migratedTasks);
-                }
+                const loadData = async () => {
+                    const firebaseTasks = await loadFromFirebase();
+                    if (firebaseTasks) {
+                        // Migrate tasks to include all required fields
+                        const migratedTasks = firebaseTasks.map((task, index) => {
+                            let invoiceNum = task.invoiceNumber;
+                            if (!invoiceNum) {
+                                const date = task.requestDate ? new Date(task.requestDate) : new Date();
+                                invoiceNum = date.toLocaleDateString('en-US', { 
+                                    year: '2-digit', 
+                                    month: '2-digit', 
+                                    day: '2-digit' 
+                                }).replace(/\//g, '') + '-' + String(index + 1).padStart(4, '0');
+                            }
+                            return {
+                                ...task,
+                                address: task.address || '',
+                                workHours: task.workHours !== undefined ? task.workHours : 0,
+                                invoiceNumber: invoiceNum
+                            };
+                        });
+                        setTasks(migratedTasks);
+                    }
+                };
+                loadData();
 
                 const savedSettings = localStorage.getItem('rapidoSettings');
                 if (savedSettings) {
@@ -944,9 +1000,11 @@
                 }
             }, []);
 
-            // Save data to localStorage
+            // Save data to Firebase and localStorage
             useEffect(() => {
-                localStorage.setItem('rapidoTasks', JSON.stringify(tasks));
+                if (tasks.length >= 0) {
+                    saveToFirebase(tasks);
+                }
             }, [tasks]);
 
             useEffect(() => {
