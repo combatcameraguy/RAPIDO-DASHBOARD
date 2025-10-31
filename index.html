@@ -930,11 +930,15 @@
                 }
             };
 
-            // Load data from Firebase or localStorage
+            // Load data from Firebase or localStorage with REAL-TIME SYNC
             useEffect(() => {
-                const loadData = async () => {
-                    const firebaseTasks = await loadFromFirebase();
-                    if (firebaseTasks) {
+                let isInitialLoad = true;
+                
+                // Set up real-time Firebase listener
+                const tasksRef = database.ref('tasks');
+                const unsubscribe = tasksRef.on('value', (snapshot) => {
+                    const firebaseTasks = snapshot.val();
+                    if (firebaseTasks && firebaseTasks.length > 0) {
                         // Migrate tasks to include all required fields
                         const migratedTasks = firebaseTasks.map((task, index) => {
                             let invoiceNum = task.invoiceNumber;
@@ -954,9 +958,30 @@
                             };
                         });
                         setTasks(migratedTasks);
+                        console.log('🔄 Real-time sync: Loaded ' + migratedTasks.length + ' tasks from Firebase');
+                    } else if (isInitialLoad) {
+                        // Only load from localStorage on initial load if Firebase is empty
+                        const localTasks = localStorage.getItem('rapidoTasks');
+                        if (localTasks) {
+                            const parsed = JSON.parse(localTasks);
+                            setTasks(parsed);
+                            console.log('💾 Loaded from localStorage (Firebase empty)');
+                        }
                     }
+                    isInitialLoad = false;
+                }, (error) => {
+                    console.error('❌ Firebase listener error:', error);
+                    // Fallback to localStorage
+                    const localTasks = localStorage.getItem('rapidoTasks');
+                    if (localTasks) {
+                        setTasks(JSON.parse(localTasks));
+                    }
+                });
+                
+                // Cleanup listener on unmount
+                return () => {
+                    tasksRef.off('value', unsubscribe);
                 };
-                loadData();
 
                 const savedSettings = localStorage.getItem('rapidoSettings');
                 if (savedSettings) {
@@ -1000,9 +1025,10 @@
                 }
             }, []);
 
-            // Save data to Firebase and localStorage
+            // Save data to Firebase and localStorage (only when local changes occur)
+            const isSyncingFromFirebase = useRef(false);
             useEffect(() => {
-                if (tasks.length >= 0) {
+                if (tasks.length >= 0 && !isSyncingFromFirebase.current) {
                     saveToFirebase(tasks);
                 }
             }, [tasks]);
