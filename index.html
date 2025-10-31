@@ -393,63 +393,14 @@
         };
 
         // Initialize Firebase
-        firebase.initializeApp(firebaseConfig);
-        const database = firebase.database();
-
-        // ============ FIREBASE SYNC FUNCTIONS ============
-        // Save data to Firebase and local storage
-        const saveToFirebase = async (tasks) => {
-            // Always save to localStorage first
-            try {
-                localStorage.setItem('rapidoTasks', JSON.stringify(tasks));
-                console.log("💾 Saved to local storage");
-            } catch (error) {
-                console.error("❌ Local storage failed:", error);
-            }
-
-            // Try Firebase if online
-            if (navigator.onLine) {
-                try {
-                    await database.ref('tasks').set(tasks);
-                    console.log("☁️ Synced to Firebase");
-                    return true;
-                } catch (error) {
-                    console.error("❌ Firebase sync failed:", error);
-                    return false;
-                }
-            }
-            return false;
-        };
-
-        // Load data from Firebase or localStorage
-        const loadFromFirebase = async () => {
-            // Try Firebase first if online
-            if (navigator.onLine) {
-                try {
-                    const snapshot = await database.ref('tasks').once('value');
-                    const firebaseTasks = snapshot.val();
-                    if (firebaseTasks && firebaseTasks.length > 0) {
-                        console.log("☁️ Loaded from Firebase");
-                        return firebaseTasks;
-                    }
-                } catch (error) {
-                    console.error("❌ Firebase load failed:", error);
-                }
-            }
-            
-            // Fallback to localStorage
-            try {
-                const localTasks = localStorage.getItem('rapidoTasks');
-                if (localTasks) {
-                    console.log("💾 Loaded from local storage");
-                    return JSON.parse(localTasks);
-                }
-            } catch (error) {
-                console.error("❌ Local storage load failed:", error);
-            }
-            
-            return null;
-        };
+        let database;
+        try {
+            firebase.initializeApp(firebaseConfig);
+            database = firebase.database();
+            console.log('✅ Firebase initialized successfully');
+        } catch (error) {
+            console.error('❌ Firebase initialization error:', error);
+        }
 
         // Theme definitions
         const colorThemes = {
@@ -816,6 +767,8 @@
         function App() {
             // State management
             const [tasks, setTasks] = useState([]);
+            const [initialLoadComplete, setInitialLoadComplete] = useState(false);
+            const [firebaseSynced, setFirebaseSynced] = useState(false);
             const [collapsedGroups, setCollapsedGroups] = useState({});
             const [searchTerm, setSearchTerm] = useState('');
             const [filterStatus, setFilterStatus] = useState('all');
@@ -930,82 +883,119 @@
                 }
             };
 
-            // Load data from Firebase or localStorage
+            // Load data with real-time Firebase sync (COMCAM pattern)
             useEffect(() => {
-                const loadData = async () => {
-                    const firebaseTasks = await loadFromFirebase();
-                    if (firebaseTasks) {
-                        // Migrate tasks to include all required fields
-                        const migratedTasks = firebaseTasks.map((task, index) => {
-                            let invoiceNum = task.invoiceNumber;
-                            if (!invoiceNum) {
-                                const date = task.requestDate ? new Date(task.requestDate) : new Date();
-                                invoiceNum = date.toLocaleDateString('en-US', { 
-                                    year: '2-digit', 
-                                    month: '2-digit', 
-                                    day: '2-digit' 
-                                }).replace(/\//g, '') + '-' + String(index + 1).padStart(4, '0');
+                // First load from localStorage immediately
+                const loadLocal = () => {
+                    const savedSettings = localStorage.getItem('rapidoSettings');
+                    if (savedSettings) {
+                        const parsedSettings = JSON.parse(savedSettings);
+                        
+                        // Migrate settings to include address column if missing
+                        if (!parsedSettings.columnOrder.includes('address')) {
+                            const clientIndex = parsedSettings.columnOrder.indexOf('client');
+                            parsedSettings.columnOrder.splice(clientIndex + 1, 0, 'address');
+                        }
+                        
+                        if (!parsedSettings.columnWidths.address) {
+                            parsedSettings.columnWidths.address = 200;
+                        }
+                        
+                        // Migrate settings to include workHours column if missing
+                        if (!parsedSettings.columnOrder.includes('workHours')) {
+                            const materialCostIndex = parsedSettings.columnOrder.indexOf('materialCost');
+                            if (materialCostIndex !== -1) {
+                                parsedSettings.columnOrder.splice(materialCostIndex + 1, 0, 'workHours');
                             }
-                            return {
-                                ...task,
-                                address: task.address || '',
-                                workHours: task.workHours !== undefined ? task.workHours : 0,
-                                invoiceNumber: invoiceNum
-                            };
-                        });
-                        setTasks(migratedTasks);
+                        }
+                        
+                        if (!parsedSettings.columnWidths.workHours) {
+                            parsedSettings.columnWidths.workHours = 110;
+                        }
+                        
+                        // Migrate settings to include invoiceNumber column if missing
+                        if (!parsedSettings.columnOrder.includes('invoiceNumber')) {
+                            const taskIndex = parsedSettings.columnOrder.indexOf('task');
+                            if (taskIndex !== -1) {
+                                parsedSettings.columnOrder.splice(taskIndex + 1, 0, 'invoiceNumber');
+                            }
+                        }
+                        
+                        if (!parsedSettings.columnWidths.invoiceNumber) {
+                            parsedSettings.columnWidths.invoiceNumber = 120;
+                        }
+                        
+                        setSettings(prev => ({ ...prev, ...parsedSettings }));
+                    }
+
+                    const localTasks = localStorage.getItem('rapidoTasks');
+                    if (localTasks) {
+                        const parsed = JSON.parse(localTasks);
+                        setTasks(parsed);
+                        console.log('💾 Loaded from localStorage:', parsed.length, 'tasks');
                     }
                 };
-                loadData();
 
-                const savedSettings = localStorage.getItem('rapidoSettings');
-                if (savedSettings) {
-                    const parsedSettings = JSON.parse(savedSettings);
-                    
-                    // Migrate settings to include address column if missing
-                    if (!parsedSettings.columnOrder.includes('address')) {
-                        const clientIndex = parsedSettings.columnOrder.indexOf('client');
-                        parsedSettings.columnOrder.splice(clientIndex + 1, 0, 'address');
-                    }
-                    
-                    if (!parsedSettings.columnWidths.address) {
-                        parsedSettings.columnWidths.address = 200;
-                    }
-                    
-                    // Migrate settings to include workHours column if missing
-                    if (!parsedSettings.columnOrder.includes('workHours')) {
-                        const materialCostIndex = parsedSettings.columnOrder.indexOf('materialCost');
-                        if (materialCostIndex !== -1) {
-                            parsedSettings.columnOrder.splice(materialCostIndex + 1, 0, 'workHours');
+                loadLocal();
+
+                // Set up real-time Firebase listener
+                if (database) {
+                    const tasksRef = database.ref('tasks');
+                    const tasksListener = tasksRef.on('value', (snapshot) => {
+                        const data = snapshot.val();
+                        if (data && Array.isArray(data)) {
+                            // Migrate tasks to include all required fields
+                            const migratedTasks = data.map((task, index) => {
+                                let invoiceNum = task.invoiceNumber;
+                                if (!invoiceNum) {
+                                    const date = task.requestDate ? new Date(task.requestDate) : new Date();
+                                    invoiceNum = date.toLocaleDateString('en-US', { 
+                                        year: '2-digit', 
+                                        month: '2-digit', 
+                                        day: '2-digit' 
+                                    }).replace(/\//g, '') + '-' + String(index + 1).padStart(4, '0');
+                                }
+                                return {
+                                    ...task,
+                                    address: task.address || '',
+                                    workHours: task.workHours !== undefined ? task.workHours : 0,
+                                    invoiceNumber: invoiceNum
+                                };
+                            });
+                            setTasks(migratedTasks);
+                            localStorage.setItem('rapidoTasks', JSON.stringify(migratedTasks));
+                            console.log('🔄 Tasks updated from Firebase:', migratedTasks.length, 'tasks');
+                            setFirebaseSynced(true);
+                            if (!initialLoadComplete) {
+                                setInitialLoadComplete(true);
+                            }
+                        } else if (!initialLoadComplete) {
+                            setInitialLoadComplete(true);
+                            setFirebaseSynced(true);
                         }
-                    }
-                    
-                    if (!parsedSettings.columnWidths.workHours) {
-                        parsedSettings.columnWidths.workHours = 110;
-                    }
-                    
-                    // Migrate settings to include invoiceNumber column if missing
-                    if (!parsedSettings.columnOrder.includes('invoiceNumber')) {
-                        const taskIndex = parsedSettings.columnOrder.indexOf('task');
-                        if (taskIndex !== -1) {
-                            parsedSettings.columnOrder.splice(taskIndex + 1, 0, 'invoiceNumber');
-                        }
-                    }
-                    
-                    if (!parsedSettings.columnWidths.invoiceNumber) {
-                        parsedSettings.columnWidths.invoiceNumber = 120;
-                    }
-                    
-                    setSettings(prev => ({ ...prev, ...parsedSettings }));
+                    });
+
+                    // Cleanup listener on unmount
+                    return () => {
+                        console.log('🔌 Disconnecting Firebase listener');
+                        tasksRef.off('value', tasksListener);
+                    };
                 }
             }, []);
 
-            // Save data to Firebase and localStorage
+            // Save data to Firebase and localStorage (COMCAM pattern)
             useEffect(() => {
-                if (tasks.length >= 0) {
-                    saveToFirebase(tasks);
+                try {
+                    localStorage.setItem('rapidoTasks', JSON.stringify(tasks));
+                    // Only save to Firebase if initial load is complete
+                    if (database && initialLoadComplete && tasks.length >= 0) {
+                        database.ref('tasks').set(tasks);
+                        console.log('💾 Tasks saved to Firebase');
+                    }
+                } catch (error) {
+                    console.error('Error saving tasks:', error);
                 }
-            }, [tasks]);
+            }, [tasks, initialLoadComplete]);
 
             useEffect(() => {
                 localStorage.setItem('rapidoSettings', JSON.stringify(settings));
@@ -1756,6 +1746,18 @@
                                 </h1>
                                 
                                 <div className="flex items-center gap-3">
+                                    {/* Firebase Sync Status Indicator */}
+                                    <div className={`px-3 py-1.5 rounded-lg font-medium text-sm flex items-center gap-2 ${
+                                        firebaseSynced 
+                                            ? 'bg-green-100 text-green-800' 
+                                            : 'bg-yellow-100 text-yellow-800'
+                                    }`}>
+                                        <div className={`w-2 h-2 rounded-full ${
+                                            firebaseSynced ? 'bg-green-600' : 'bg-yellow-600 animate-pulse'
+                                        }`}></div>
+                                        {firebaseSynced ? 'Cloud Synced' : 'Syncing...'}
+                                    </div>
+                                    
                                     {/* New Requests Button - Always visible */}
                                     <button
                                         onClick={() => {
