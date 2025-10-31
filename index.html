@@ -940,6 +940,7 @@
 
                 // Set up real-time Firebase listener
                 if (database) {
+                    // Tasks listener
                     const tasksRef = database.ref('tasks');
                     const tasksListener = tasksRef.on('value', (snapshot) => {
                         const data = snapshot.val();
@@ -975,10 +976,22 @@
                         }
                     });
 
+                    // Settings listener
+                    const settingsRef = database.ref('settings');
+                    const settingsListener = settingsRef.on('value', (snapshot) => {
+                        const data = snapshot.val();
+                        if (data) {
+                            setSettings(prev => ({ ...prev, ...data }));
+                            localStorage.setItem('rapidoSettings', JSON.stringify(data));
+                            console.log('🔄 Settings updated from Firebase');
+                        }
+                    });
+
                     // Cleanup listener on unmount
                     return () => {
-                        console.log('🔌 Disconnecting Firebase listener');
+                        console.log('🔌 Disconnecting Firebase listeners');
                         tasksRef.off('value', tasksListener);
+                        settingsRef.off('value', settingsListener);
                     };
                 }
             }, []);
@@ -999,7 +1012,12 @@
 
             useEffect(() => {
                 localStorage.setItem('rapidoSettings', JSON.stringify(settings));
-            }, [settings]);
+                // Also save to Firebase if initial load is complete
+                if (database && initialLoadComplete) {
+                    database.ref('settings').set(settings);
+                    console.log('💾 Settings saved to Firebase');
+                }
+            }, [settings, initialLoadComplete]);
 
             // Firebase connection check
             const checkApiConnection = useCallback(async () => {
