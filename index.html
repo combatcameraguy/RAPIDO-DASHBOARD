@@ -314,6 +314,18 @@
         );
 
         // Firebase configuration - BRAND NEW CREDENTIALS (v2)
+        // IMPORTANT: Your Firebase Realtime Database Rules are configured as:
+        // {
+        //   "rules": {
+        //     "users": {
+        //       "$uid": {
+        //         ".read": "$uid === auth.uid",
+        //         ".write": "$uid === auth.uid"
+        //       }
+        //     }
+        //   }
+        // }
+        // This means each user can only read/write their OWN data under /users/{their-uid}/
         const firebaseConfig = {
             apiKey: "AIzaSyDvYPFm6PtVXKe01Uo1_CMGqrWFp_oXbm0",
             authDomain: "rapido-dashboard.firebaseapp.com",
@@ -325,12 +337,18 @@
         };
 
         // Initialize Firebase
-        if (!firebase.apps.length) {
-            firebase.initializeApp(firebaseConfig);
+        let database;
+        let auth;
+        try {
+            if (!firebase.apps.length) {
+                firebase.initializeApp(firebaseConfig);
+            }
+            database = firebase.database();
+            auth = firebase.auth();
+            console.log('✅ Firebase initialized successfully');
+        } catch (error) {
+            console.error('❌ Firebase initialization error:', error);
         }
-
-        const auth = firebase.auth();
-        const database = firebase.database();
 
         // Theme configurations
         const themes = {
